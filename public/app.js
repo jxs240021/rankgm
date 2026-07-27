@@ -80,3 +80,24 @@ socket.on('room-joined', ({ roomCode, isHost, room }) => {
     }
   }
 });
+
+
+
+
+// Run automatically when the page loads
+window.addEventListener('DOMContentLoaded', () => {
+  // Parse query parameters from URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const roomFromUrl = urlParams.get('room');
+
+  if (roomFromUrl) {
+    // Find your "Room Code" input field on the join screen
+    const roomCodeInput = document.getElementById('room-code-input'); // Match your input ID
+    if (roomCodeInput) {
+      roomCodeInput.value = roomFromUrl.toUpperCase();
+    }
+
+    // Optional: Highlight or scroll to the join section, or notify user
+    console.log(`Pre-filled room code from link: ${roomFromUrl}`);
+  }
+});
