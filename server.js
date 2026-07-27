@@ -24,50 +24,64 @@ try {
 
 let rooms = {}; // RoomCode -> Room State Object
 
-function getRandomWords(count) {
-  if (movieDictionary.length === 0) return [];
-  let shuffled = [...movieDictionary].sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, count);
+// Get unique random words that haven't been used in this game instance
+function getRandomWords(count, usedWordsSet) {
+  let availableWords = movieDictionary.filter(word => !usedWordsSet.has(word));
+  
+  // Reshuffle available pool
+  let shuffled = [...availableWords].sort(() => 0.5 - Math.random());
+  let selected = shuffled.slice(0, count);
+
+  // Mark selected words as used
+  selected.forEach(word => usedWordsSet.add(word));
+  return selected;
 }
 
 io.on('connection', (socket) => {
   socket.on('create-room', ({ playerName }) => {
-    // Corrected string formatting syntax for room code generation
     const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
     rooms[roomCode] = {
       hostId: socket.id,
       players: [{ id: socket.id, name: playerName, score: 0 }],
-      state: 'lobby', // lobby, selecting, hosting, round-over, game-over
+      state: 'lobby', // lobby, selecting, hosting, game-over
       roundsPlayed: 0,
       hostRotationIndex: 0,
       currentHostId: null,
-      playerHands: {}, // socketId -> array of 4 words
-      selectedWords: {} // socketId -> word they chose this turn
+      playerHands: {},         // socketId -> array of words currently in hand
+      selectedWords: {},       // socketId -> word chosen this round
+      usedWords: new Set(),    // Track all words dealt/used during this game session
+      passedHands: {}          // socketId -> hand of 3 words passed to them for the next turn
     };
 
     socket.join(roomCode);
-    socket.emit('room-joined', { roomCode, isHost: true, room: rooms[roomCode] });
+    socket.emit('room-joined', { roomCode, isHost: true, room: serializeRoom(rooms[roomCode]) });
   });
 
   socket.on('join-room', ({ roomCode, playerName }) => {
     if (!roomCode) return;
     roomCode = roomCode.toUpperCase();
-    if (!rooms[roomCode]) {
+    let room = rooms[roomCode];
+
+    if (!room) {
       return socket.emit('error-msg', 'Room not found!');
     }
-    if (rooms[roomCode].state !== 'lobby') {
-      return socket.emit('error-msg', 'Game already in progress!');
+    // Block new players once game has started
+    if (room.state !== 'lobby') {
+      return socket.emit('error-msg', 'Game already in progress! New players cannot join once a game has started.');
     }
 
-    rooms[roomCode].players.push({ id: socket.id, name: playerName, score: 0 });
+    room.players.push({ id: socket.id, name: playerName, score: 0 });
     socket.join(roomCode);
-    io.to(roomCode).emit('update-room', rooms[roomCode]);
-    socket.emit('room-joined', { roomCode, isHost: false, room: rooms[roomCode] });
+    io.to(roomCode).emit('update-room', serializeRoom(room));
+    socket.emit('room-joined', { roomCode, isHost: false, room: serializeRoom(room) });
   });
 
   socket.on('start-game', ({ roomCode }) => {
     let room = rooms[roomCode];
     if (!room || room.hostId !== socket.id) return;
+    if (room.state !== 'lobby') {
+      return socket.emit('error-msg', 'Game has already started!');
+    }
     if (room.players.length < 2) {
       return socket.emit('error-msg', 'Need at least 2 players to start!');
     }
@@ -76,15 +90,19 @@ io.on('connection', (socket) => {
     room.roundsPlayed = 0;
     room.hostRotationIndex = 0;
     room.currentHostId = room.players[0].id; // First player is host of round 1
+    room.usedWords = new Set();
+    room.passedHands = {};
 
-    // Deal 4 random words to everyone except the current host
+    // Initial deal: Deal 4 unique, fresh words to everyone except the current round host
     room.players.forEach(p => {
       if (p.id !== room.currentHostId) {
-        room.playerHands[p.id] = getRandomWords(4);
+        room.playerHands[p.id] = getRandomWords(4, room.usedWords);
+      } else {
+        room.playerHands[p.id] = [];
       }
     });
 
-    io.to(roomCode).emit('game-started', room);
+    io.to(roomCode).emit('game-started', serializeRoom(room));
   });
 
   socket.on('submit-word', ({ roomCode, chosenWord }) => {
@@ -93,28 +111,25 @@ io.on('connection', (socket) => {
 
     room.selectedWords[socket.id] = chosenWord;
 
-    // Remove selected word from player's hand and pass remaining 3 to next player
+    // Get current hand, remove chosen word, leaving exactly 3 unchosen words
     let hand = room.playerHands[socket.id] || [];
-    let wordIndex = hand.indexOf(chosenWord);
-    if (wordIndex > -1) hand.splice(wordIndex, 1);
+    let remainingThreeWords = hand.filter(w => w !== chosenWord);
 
+    // Determine who receives these 3 words next
     let currentPlayerIndex = room.players.findIndex(p => p.id === socket.id);
     let nextPlayerIndex = (currentPlayerIndex + 1) % room.players.length;
     let nextPlayer = room.players[nextPlayerIndex];
 
-    // If next player is the host, skip them and pass to the player after them
+    // Skip the round host when passing hands
     if (nextPlayer.id === room.currentHostId) {
       nextPlayerIndex = (nextPlayerIndex + 1) % room.players.length;
       nextPlayer = room.players[nextPlayerIndex];
     }
 
-    // Give remaining words to next player (if they are not the host)
-    if (nextPlayer.id !== room.currentHostId) {
-      room.playerHands[nextPlayer.id] = (room.playerHands[nextPlayer.id] || []).concat(hand);
-    }
-    room.playerHands[socket.id] = []; // Clear hand after passing
+    // Store remaining 3 words in passedHands queue for next turn
+    room.passedHands[nextPlayer.id] = remainingThreeWords;
 
-    // Check if all non-host players have submitted a word
+    // Check if all active non-host players have submitted a word
     let nonHostPlayers = room.players.filter(p => p.id !== room.currentHostId);
     let allSubmitted = nonHostPlayers.every(p => room.selectedWords[p.id]);
 
@@ -122,20 +137,19 @@ io.on('connection', (socket) => {
       room.state = 'hosting'; // Transition to host ranking screen
     }
 
-    io.to(roomCode).emit('update-room', room);
+    io.to(roomCode).emit('update-room', serializeRoom(room));
   });
 
   socket.on('submit-rankings', ({ roomCode, rankedSocketIds }) => {
     let room = rooms[roomCode];
     if (!room || room.currentHostId !== socket.id || room.state !== 'hosting') return;
 
-    // Expects `rankedSocketIds` to be ordered from best (index 0) to worst (last index).
-    // The top-ranked player gets highest points, descending down to 1 point for last place.
+    // Award points (1st place = highest points down to 1 point)
     let totalRanked = rankedSocketIds.length;
     rankedSocketIds.forEach((sId, index) => {
       let player = room.players.find(p => p.id === sId);
       if (player) {
-        let pointsEarned = totalRanked - index; // e.g., 1st gets 3, 2nd gets 2, 3rd gets 1
+        let pointsEarned = totalRanked - index;
         player.score += pointsEarned;
       }
     });
@@ -144,21 +158,33 @@ io.on('connection', (socket) => {
     if (room.roundsPlayed >= room.players.length) {
       room.state = 'game-over';
     } else {
-      // Rotate host role to the next person
+      // Advance round host
       room.hostRotationIndex = (room.hostRotationIndex + 1) % room.players.length;
       room.currentHostId = room.players[room.hostRotationIndex].id;
       room.state = 'selecting';
       room.selectedWords = {};
-      room.playerHands = {};
-
+      
+      // Prepare new hands for non-hosts:
+      // If they were passed 3 words from previous player, give them those 3 + 1 new unique word = 4 total.
+      // Otherwise, deal 4 new unique words.
       room.players.forEach(p => {
         if (p.id !== room.currentHostId) {
-          room.playerHands[p.id] = getRandomWords(4);
+          let passedThree = room.passedHands[p.id] || [];
+          if (passedThree.length === 3) {
+            let oneNewWord = getRandomWords(1, room.usedWords);
+            room.playerHands[p.id] = [...passedThree, ...oneNewWord];
+          } else {
+            room.playerHands[p.id] = getRandomWords(4, room.usedWords);
+          }
+        } else {
+          room.playerHands[p.id] = [];
         }
       });
+
+      room.passedHands = {}; // Clear queued passed hands
     }
 
-    io.to(roomCode).emit('update-room', room);
+    io.to(roomCode).emit('update-room', serializeRoom(room));
   });
 
   socket.on('disconnect', () => {
@@ -168,11 +194,19 @@ io.on('connection', (socket) => {
       if (room.players.length === 0) {
         delete rooms[roomCode];
       } else {
-        io.to(roomCode).emit('update-room', room);
+        io.to(roomCode).emit('update-room', serializeRoom(room));
       }
     }
   });
 });
+
+// Helper function to convert Sets to Arrays for JSON serialization over web sockets
+function serializeRoom(room) {
+  return {
+    ...room,
+    usedWords: Array.from(room.usedWords || [])
+  };
+}
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
