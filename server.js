@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -9,28 +10,30 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Movie dictionary (Popular movies, actors, and iconic elements)
-const movieDictionary = [
-  "The Godfather", "Star Wars", "Inception", "Jurassic Park", "The Matrix",
-  "Tom Hanks", "Meryl Streep", "Leonardo DiCaprio", "Denzel Washington", "Scarlett Johansson",
-  "Lightsaber", "The One Ring", "DeLorean Time Machine", "Glass Slippers", "Utility Belt",
-  "Titanic", "Forrest Gump", "Pulp Fiction", "The Dark Knight", "Schindler's List",
-  "Interstellar", "Gladiator", "Avatar", "Avengers: Endgame", "The Lord of the Rings",
-  "Indiana Jones", "Darth Vader", "Jack Dawson", "Rose DeWitt Bukater", "The Terminator",
-  "Yoda", "Spider-Man", "Marvel Cinematic Universe", "The Wizard of Oz", "Casablanca"
-];
+// Load external JSON dictionary file on server startup
+let movieDictionary = [];
+const dictionaryPath = path.join(__dirname, 'movies.json');
+
+try {
+  const rawData = fs.readFileSync(dictionaryPath, 'utf-8');
+  movieDictionary = JSON.parse(rawData);
+  console.log(`Successfully loaded ${movieDictionary.length} entries into dictionary.`);
+} catch (error) {
+  console.error('Error reading movies.json file:', error);
+}
 
 let rooms = {}; // RoomCode -> Room State Object
 
 function getRandomWords(count) {
+  if (movieDictionary.length === 0) return [];
   let shuffled = [...movieDictionary].sort(() => 0.5 - Math.random());
   return shuffled.slice(0, count);
 }
 
 io.on('connection', (socket) => {
   socket.on('create-room', ({ playerName }) => {
-    //const roomCode = Math.random().toString(36.substring(2, 6)).toUpperCase();
-      const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+    // Corrected string formatting syntax for room code generation
+    const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
     rooms[roomCode] = {
       hostId: socket.id,
       players: [{ id: socket.id, name: playerName, score: 0 }],
@@ -47,6 +50,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join-room', ({ roomCode, playerName }) => {
+    if (!roomCode) return;
     roomCode = roomCode.toUpperCase();
     if (!rooms[roomCode]) {
       return socket.emit('error-msg', 'Room not found!');
@@ -90,7 +94,7 @@ io.on('connection', (socket) => {
     room.selectedWords[socket.id] = chosenWord;
 
     // Remove selected word from player's hand and pass remaining 3 to next player
-    let hand = room.playerHands[socket.id];
+    let hand = room.playerHands[socket.id] || [];
     let wordIndex = hand.indexOf(chosenWord);
     if (wordIndex > -1) hand.splice(wordIndex, 1);
 
@@ -125,12 +129,13 @@ io.on('connection', (socket) => {
     let room = rooms[roomCode];
     if (!room || room.currentHostId !== socket.id || room.state !== 'hosting') return;
 
-    // Award points based on rank (e.g., 1st place gets max points, descending)
+    // Expects `rankedSocketIds` to be ordered from best (index 0) to worst (last index).
+    // The top-ranked player gets highest points, descending down to 1 point for last place.
     let totalRanked = rankedSocketIds.length;
     rankedSocketIds.forEach((sId, index) => {
       let player = room.players.find(p => p.id === sId);
       if (player) {
-        let pointsEarned = totalRanked - index; // e.g., 3rd gets 1, 2nd gets 2, 1st gets 3
+        let pointsEarned = totalRanked - index; // e.g., 1st gets 3, 2nd gets 2, 3rd gets 1
         player.score += pointsEarned;
       }
     });
