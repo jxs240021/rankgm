@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Movie Prompt Game</title>
+</head>
+<body style="font-family: Arial, sans-serif; text-align: center; margin-top: 50px;">
+    <h1>🎬 Movie Prompt Exchange</h1>
+    
+    <div id="auth-screen">
+        <input type="text" id="player-name" placeholder="Your Name" /><br><br>
+        <button id="create-btn">Create New Room</button><br><br>
+        <p>- OR -</p>
+        <input type="text" id="room-code-input" placeholder="Room Code" /><br>
+        <button id="join-btn" style="margin-top: 10px;">Join Room</button>
+    </div>
+
+    <div id="game-screen" style="display:none;">
+        <h2>Room Code: <span id="display-room-code" style="color: blue;"></span></h2>
+        <div id="scoreboard" style="background: #f4f4f4; padding: 10px; margin: 10px auto; width: 300px; border-radius: 5px;"></div>
+        <div id="lobby-section"></div>
+        <div id="play-section"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="index.js"></script>
+</body>
+</html>
