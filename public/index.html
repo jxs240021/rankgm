@@ -7,10 +7,25 @@
 <body style="font-family: Arial, sans-serif; text-align: center; margin-top: 50px;">
     <h1>🎬  Prompt Exchange</h1>
     
-<!-- Place this wherever you want the user's name visible -->
+
+    
+    <!-- Place this wherever you want the user's name visible -->
 <div id="player-badge">
   <span id="user-display-name"></span>
 </div>
+    
+
+    
+    <!-- Inside your Lobby Screen section -->
+<div id="lobby-screen">
+  <h2>Room Code: <span id="display-room-code"></span></h2>
+  
+  <!-- Add this Share Link button -->
+  <button id="copy-link-btn" style="display: none;">📋 Copy Share Link</button>
+  <span id="copy-status" style="color: green; font-size: 0.9em;"></span>
+</div>
+
+
     
     <div id="auth-screen">
         <input type="text" id="player-name" placeholder="Your Name" /><br><br>
