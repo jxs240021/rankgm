@@ -1,3 +1,32 @@
+socket.on('room-joined', ({ roomCode, isHost, room }) => {
+  currentRoomCode = roomCode;
+
+  // Display room code
+  const roomCodeDisplay = document.getElementById('display-room-code');
+  if (roomCodeDisplay) roomCodeDisplay.textContent = roomCode;
+
+  // If host, show the "Copy Share Link" button
+  const copyBtn = document.getElementById('copy-link-btn');
+  if (isHost && copyBtn) {
+    copyBtn.style.display = 'inline-block';
+    
+    copyBtn.onclick = () => {
+      // Create link like: https://your-app.onrender.com/?room=ABCD
+      const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+      
+      // Copy to clipboard
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        const statusSpan = document.getElementById('copy-status');
+        if (statusSpan) {
+          statusSpan.textContent = 'Link copied to clipboard!';
+          setTimeout(() => { statusSpan.textContent = ''; }, 3000);
+        }
+      });
+    };
+  }
+});
+
+
 // Front-end event listener for Start Game button
 document.getElementById('start-game-btn').addEventListener('click', () => {
   const confirmStart = confirm(
