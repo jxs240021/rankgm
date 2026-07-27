@@ -29,7 +29,8 @@ function getRandomWords(count) {
 
 io.on('connection', (socket) => {
   socket.on('create-room', ({ playerName }) => {
-    const roomCode = Math.random().toString(36.substring(2, 6)).toUpperCase();
+    //const roomCode = Math.random().toString(36.substring(2, 6)).toUpperCase();
+      const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
     rooms[roomCode] = {
       hostId: socket.id,
       players: [{ id: socket.id, name: playerName, score: 0 }],
