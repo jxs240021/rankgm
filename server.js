@@ -105,29 +105,23 @@ io.on('connection', (socket) => {
     io.to(roomCode).emit('game-started', serializeRoom(room));
   });
 
-  socket.on('submit-word', ({ roomCode, chosenWord }) => {
+socket.on('submit-word', ({ roomCode, chosenWord }) => {
     let room = rooms[roomCode];
     if (!room || room.state !== 'selecting') return;
 
     room.selectedWords[socket.id] = chosenWord;
 
-    // Get current hand, remove chosen word, leaving exactly 3 unchosen words
+    // Get current hand and remove chosen word, leaving exactly 3 unchosen words
     let hand = room.playerHands[socket.id] || [];
     let remainingThreeWords = hand.filter(w => w !== chosenWord);
 
-    // Determine who receives these 3 words next
-    let currentPlayerIndex = room.players.findIndex(p => p.id === socket.id);
-    let nextPlayerIndex = (currentPlayerIndex + 1) % room.players.length;
-    let nextPlayer = room.players[nextPlayerIndex];
+    // Find the next player in the full seating circle (including current host)
+    let submitterIndex = room.players.findIndex(p => p.id === socket.id);
+    let recipientIndex = (submitterIndex + 1) % room.players.length;
+    let recipientPlayer = room.players[recipientIndex];
 
-    // Skip the round host when passing hands
-    if (nextPlayer.id === room.currentHostId) {
-      nextPlayerIndex = (nextPlayerIndex + 1) % room.players.length;
-      nextPlayer = room.players[nextPlayerIndex];
-    }
-
-    // Store remaining 3 words in passedHands queue for next turn
-    room.passedHands[nextPlayer.id] = remainingThreeWords;
+    // Pass the 3 discarded words directly to the next player in seat order
+    room.passedHands[recipientPlayer.id] = remainingThreeWords;
 
     // Check if all active non-host players have submitted a word
     let nonHostPlayers = room.players.filter(p => p.id !== room.currentHostId);
@@ -139,7 +133,7 @@ io.on('connection', (socket) => {
 
     io.to(roomCode).emit('update-room', serializeRoom(room));
   });
-
+  
   socket.on('submit-rankings', ({ roomCode, rankedSocketIds }) => {
     let room = rooms[roomCode];
     if (!room || room.currentHostId !== socket.id || room.state !== 'hosting') return;
@@ -158,35 +152,39 @@ io.on('connection', (socket) => {
     if (room.roundsPlayed >= room.players.length) {
       room.state = 'game-over';
     } else {
-      // Advance round host
+      // Rotate host role to the next player in seating order
       room.hostRotationIndex = (room.hostRotationIndex + 1) % room.players.length;
       room.currentHostId = room.players[room.hostRotationIndex].id;
       room.state = 'selecting';
       room.selectedWords = {};
       
-      // Prepare new hands for non-hosts:
-      // If they were passed 3 words from previous player, give them those 3 + 1 new unique word = 4 total.
-      // Otherwise, deal 4 new unique words.
+      // Deal hands for the next round:
+      // The new host gets 0 cards.
+      // Every active non-host player gets their 3 passed discarded words + 1 new unique card = 4 cards.
       room.players.forEach(p => {
         if (p.id !== room.currentHostId) {
           let passedThree = room.passedHands[p.id] || [];
+          let oneNewWord = getRandomWords(1, room.usedWords);
+
           if (passedThree.length === 3) {
-            let oneNewWord = getRandomWords(1, room.usedWords);
             room.playerHands[p.id] = [...passedThree, ...oneNewWord];
           } else {
+            // Fallback just in case (e.g. Round 1 initial deal)
             room.playerHands[p.id] = getRandomWords(4, room.usedWords);
           }
         } else {
+          // The new host does not play cards this round
           room.playerHands[p.id] = [];
         }
       });
 
-      room.passedHands = {}; // Clear queued passed hands
+      // Reset passed hands queue for the next turn
+      room.passedHands = {};
     }
 
     io.to(roomCode).emit('update-room', serializeRoom(room));
   });
-
+  
   socket.on('disconnect', () => {
     for (let roomCode in rooms) {
       let room = rooms[roomCode];
