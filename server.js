@@ -133,8 +133,18 @@ socket.on('submit-word', ({ roomCode, chosenWord }) => {
 
     io.to(roomCode).emit('update-room', serializeRoom(room));
   });
+
+
   
-  socket.on('submit-rankings', ({ roomCode, rankedSocketIds }) => {
+
+  
+  
+
+
+
+
+  
+socket.on('submit-rankings', ({ roomCode, rankedSocketIds }) => {
     let room = rooms[roomCode];
     if (!room || room.currentHostId !== socket.id || room.state !== 'hosting') return;
 
@@ -148,6 +158,9 @@ socket.on('submit-word', ({ roomCode, chosenWord }) => {
       }
     });
 
+    // 1. Sort players array by score in descending order (highest score first)
+    room.players.sort((a, b) => b.score - a.score);
+
     room.roundsPlayed++;
     if (room.roundsPlayed >= room.players.length) {
       room.state = 'game-over';
@@ -159,8 +172,6 @@ socket.on('submit-word', ({ roomCode, chosenWord }) => {
       room.selectedWords = {};
       
       // Deal hands for the next round:
-      // The new host gets 0 cards.
-      // Every active non-host player gets their 3 passed discarded words + 1 new unique card = 4 cards.
       room.players.forEach(p => {
         if (p.id !== room.currentHostId) {
           let passedThree = room.passedHands[p.id] || [];
@@ -169,21 +180,23 @@ socket.on('submit-word', ({ roomCode, chosenWord }) => {
           if (passedThree.length === 3) {
             room.playerHands[p.id] = [...passedThree, ...oneNewWord];
           } else {
-            // Fallback just in case (e.g. Round 1 initial deal)
             room.playerHands[p.id] = getRandomWords(4, room.usedWords);
           }
         } else {
-          // The new host does not play cards this round
           room.playerHands[p.id] = [];
         }
       });
 
-      // Reset passed hands queue for the next turn
       room.passedHands = {};
     }
 
     io.to(roomCode).emit('update-room', serializeRoom(room));
   });
+
+
+
+
+
   
   socket.on('disconnect', () => {
     for (let roomCode in rooms) {
